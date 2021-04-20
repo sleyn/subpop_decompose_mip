@@ -48,6 +48,8 @@ SUBPOP = range(n_subpop)
 VARIANTS = range(n_variants)
 SAMPLES = range(n_samples)
 
+solver = GUROBI_CMD()
+
 prob = LpProblem('Sample clonal decomposition', LpMinimize)
 p_matrix = LpVariable.dicts('presence', (VARIANTS, SUBPOP), cat='Binary')
 s_matrix = LpVariable.dicts('subpop', (SUBPOP, SAMPLES), lowBound=0, upBound=1)
@@ -61,6 +63,7 @@ z_matrix = LpVariable.dicts('multiplex', (VARIANTS, SUBPOP, SAMPLES), lowBound=0
 #   zi >= 0
 #   zi <= si1
 for m in SAMPLES:
+    print(f'Sample {m}')
     for v in VARIANTS:
         prob += lpSum([z_matrix[v][s][m] for s in SUBPOP]) == o_matrix[v][m]
         for s in SUBPOP:
@@ -73,17 +76,17 @@ for m in SAMPLES:
 
 # Solve the problem
 print('Solve a problem')
-prob.solve()
+prob.solve(solver)
 print("Status:", LpStatus[prob.status])
 
 # Output subpopulations matrix
-with open(os.path.join(args.out_dir, 'freq_sub_collapsed.tsv'), 'w') as out_s_file:
+with open(os.path.join(args.out_dir, 'freq_sub.tsv'), 'w') as out_s_file:
     for s in SUBPOP:
         # print(f'{s}: {value(s_matrix[s])}')
         out_s_file.write('\t'.join([str(value(s_matrix[s][m])) for m in SAMPLES]) + '\n')
 
 # Output presence matrix
-with open(os.path.join(args.out_dir, 'presence_sub_collapsed.tsv'), 'w') as out_p_file:
+with open(os.path.join(args.out_dir, 'presence_sub.tsv'), 'w') as out_p_file:
     for v in VARIANTS:
         out_p_file.write('\t'.join([str(value(p_matrix[v][s])) for s in SUBPOP]) + '\n')
 
@@ -101,6 +104,46 @@ for v in VARIANTS:
 for s in SUBPOP:
     for m in SAMPLES:
         np_s[s, m] = value(s_matrix[s][m])
+        
 
+# Sum identical subpopulations
+drop_subpop = set()
+
+for subpop in range(np_p.shape[1]):
+    # Additionally check if subpopulation has any frequency at least in one sample
+    if np.sum(np_s[subpop, :]) == 0:
+        drop_subpop.add(subpop)
+    for subpop1 in range(subpop + 1, np_p.shape[1]):
+        if np.min(np_p[:, subpop] == np_p[:, subpop1]):
+            np_s[subpop, :] += np_s[subpop1, :]
+            np_s[subpop1, :] = 0
+            drop_subpop.add(subpop1)
+
+np_p = np.delete(np_p, list(drop_subpop), axis=1)
+np_s = np.delete(np_s, list(drop_subpop), axis=0)
+
+# Add WT (all variants are 0) if not present and add up to 100%
+wt_index = -1
+
+for subpop in range(np_p.shape[1]):
+    # Check if it is wild-type
+    if np.min(np_p[:, subpop] == np.zeros((np_p.shape[0], 1))):
+        wt_index = subpop
+
+# Define RELU function
+def relu(x):
+    return np.maximum(0, x)
+
+# sum up WT to 100%
+if wt_index >= 0:
+    np_s[wt_index, :] += np.array(list(map(relu, 1 - np.sum(np_s, axis=0))))
+else:
+    np_p = np.concatenate((np_p, np.zeros((np_p.shape[0], 1))), axis=1)
+    np_s = np.concatenate((np_s, np.zeros((1, np_s.shape[1]))), axis=0)
+    np_s[np_s.shape[0] - 1, :] += np.array(list(map(relu, 1 - np.sum(np_s, axis=0))))
+
+# Print collapsed tables
+pd.DataFrame(np_p).to_csv(os.path.join(args.out_dir, 'presence_sub_collapsed.tsv'), header=False, index=False, sep='\t')
+pd.DataFrame(np_s).to_csv(os.path.join(args.out_dir, 'freq_sub_collapsed.tsv'), header=False, index=False, sep='\t')
 pd.DataFrame(np_p.dot(np_s)).to_csv(os.path.join(args.out_dir, 'reconstructed_collapsed.tsv'),
                                                             header=False, index=False, sep='\t')

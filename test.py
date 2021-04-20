@@ -5,7 +5,7 @@ from collections import defaultdict
 import time
 
 # set tests
-test_dir = os.path.join('Test', 'Test_huber_high_lambda')
+test_dir = os.path.join('Test', 'Test_pulp1')
 os.mkdir(test_dir)
 
 
@@ -38,7 +38,7 @@ def collapse_identical(p_clon):
     p_clon = np.delete(p_clon, list(drop_subpop), axis=1)
     return p_clon
 
-number_of_tests = 30
+number_of_tests = 50
 results_df = pd.DataFrame({
     'N': np.arange(0, number_of_tests, 1),     # Number of the test
     'Variants': np.zeros(number_of_tests),
@@ -56,7 +56,7 @@ results_df = pd.DataFrame({
 
 for i in range(number_of_tests):
     os.mkdir(os.path.join(test_dir, 'test' + str(i)))
-    n_variants = np.random.randint(2, 100, 1)[0]
+    n_variants = np.random.randint(2, 50, 1)[0]
     n_samples = np.random.randint(1, 10, 1)[0]
     n_subpop = n_samples * 2
     test_p_clon = p_clon_init(0.1, n_variants, n_subpop)
