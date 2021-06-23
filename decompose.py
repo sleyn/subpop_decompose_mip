@@ -16,6 +16,8 @@ parser.add_argument('-p', '--perc2prop', action='store_true',
                              'to proportions. Default: False')
 parser.add_argument('-o', '--out_dir', type=str, default='output',
                         help='Output directory. Default: output')
+parser.add_argument('--timelimit', type=int, default=180,
+                        help='Time limit for solving the problem. Default: 180')
 args = parser.parse_args()
 
 try:
@@ -48,9 +50,10 @@ SUBPOP = range(n_subpop)
 VARIANTS = range(n_variants)
 SAMPLES = range(n_samples)
 
-solver = GUROBI_CMD()
+# Solver Gurobi with 20min time limit
+solver = GUROBI_CMD(options=[('timeLimit', args.timelimit), ('msg', True)])
 
-prob = LpProblem('Sample clonal decomposition', LpMinimize)
+prob = LpProblem('Sample_clonal_decomposition', LpMinimize)
 p_matrix = LpVariable.dicts('presence', (VARIANTS, SUBPOP), cat='Binary')
 s_matrix = LpVariable.dicts('subpop', (SUBPOP, SAMPLES), lowBound=0, upBound=1)
 z_matrix = LpVariable.dicts('multiplex', (VARIANTS, SUBPOP, SAMPLES), lowBound=0, upBound=1)
@@ -147,3 +150,79 @@ pd.DataFrame(np_p).to_csv(os.path.join(args.out_dir, 'presence_sub_collapsed.tsv
 pd.DataFrame(np_s).to_csv(os.path.join(args.out_dir, 'freq_sub_collapsed.tsv'), header=False, index=False, sep='\t')
 pd.DataFrame(np_p.dot(np_s)).to_csv(os.path.join(args.out_dir, 'reconstructed_collapsed.tsv'),
                                                             header=False, index=False, sep='\t')
+
+# Run parent-child determination
+subpops_all = pd.DataFrame(np_p)
+freqs_all = pd.DataFrame(np_s)
+
+# Save number of subpopulations to the variable
+n_subpop_final = len(subpops_all.columns)
+sample_names = ['S' + str(i+1) for i in range(n_subpop_final)]
+subpops_all = subpops_all.rename(columns=dict(zip(subpops_all.columns, sample_names)))
+freqs_all['Sample'] = sample_names
+
+def findParents(subpops, n_sp):
+    # Technical table to write overall distance between two subpopulations and maximum observed distance
+    # If vectorized Sub1 - Sub2 will result in maximum 0 for all elements, then Sub1 is parent of Sub2.
+    distance_tbl = pd.DataFrame({
+        'Parent': ['-'] * (n_sp ** 2 + 1),
+        'Descendant': ['-'] * (n_sp ** 2 + 1),
+        'distance': [0] * (n_sp ** 2 + 1),
+        'maximum': [0] * (n_sp ** 2 + 1)
+    })
+
+    # Populate distance table
+    for i in range(n_sp):
+        for j in range(n_sp):
+            if i == j:
+                distance_tbl.iloc[n_sp * i + j, :] = [subpops.columns[i], subpops.columns[j], 0, 0]
+                if np.sum(subpops.iloc[:, i].to_numpy()) == 0:
+                    distance_tbl.iloc[-1, :] = [subpops.columns[i], subpops.columns[i], 1, 0]
+
+            par = subpops.iloc[:, i].to_numpy()
+            des = subpops.iloc[:, j].to_numpy()
+            maximum = np.max(par - des)
+            distance = np.sum(np.abs(par - des))
+
+            distance_tbl.iloc[n_sp * i + j, :] = [subpops.columns[i], subpops.columns[j], distance, maximum]
+
+    # Select parent-descendent pairs
+    distance_tbl_zero = distance_tbl[(distance_tbl['maximum'] == 0) & (distance_tbl['distance'] > 0)]
+    distance_tbl_zero = distance_tbl_zero.loc[distance_tbl_zero.groupby('Descendant')['distance'].idxmin()]
+
+    return distance_tbl_zero
+
+
+# Output table
+distance_tbl_out = pd.DataFrame({
+        'Parent': ['-'] * n_subpop_final,
+        'Descendant': sample_names,
+        'distance': [0] * n_subpop_final,
+        'maximum': [0] * n_subpop_final
+    })
+
+# Samples for the cullrent round of parent evaluation
+samples_to_analysis = set()
+
+for i in range(n_samples):
+    samples_to_analysis.update(
+        freqs_all['Sample'][freqs_all.iloc[:, i] > 0].to_list()
+    )
+    subpops_to_analysis = subpops_all[samples_to_analysis]
+    tbl_out_round = findParents(subpops_to_analysis, len(samples_to_analysis))
+
+    for relation in tbl_out_round.iterrows():
+        subpop_current = relation[1]['Descendant']
+        # Write only if Parent not found yet
+        if distance_tbl_out[distance_tbl_out['Descendant'] == subpop_current]['Parent'].item() == '-':
+            distance_tbl_out.loc[distance_tbl_out['Descendant'] == subpop_current, 'Parent'] = relation[1]['Parent']
+            distance_tbl_out.loc[distance_tbl_out['Descendant'] == subpop_current, 'distance'] = relation[1]['distance']
+            distance_tbl_out.loc[distance_tbl_out['Descendant'] == subpop_current, 'maximum'] = relation[1]['maximum']
+
+
+# Sort output
+distance_tbl_out['number'] = [int(sample[1:]) for sample in distance_tbl_out['Descendant'].to_list()]
+distance_tbl_out = distance_tbl_out.sort_values(by=['number']).drop(columns=['number'])
+
+# Write output
+distance_tbl_out.to_csv(os.path.join(args.out_dir, 'parent_collapsed.tsv'), sep='\t', index=False)

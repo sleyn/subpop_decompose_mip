@@ -5,7 +5,7 @@ from collections import defaultdict
 import time
 
 # set tests
-test_dir = os.path.join('Test', 'Test_pulp1')
+test_dir = os.path.join('Test', 'Test_pulp2')
 os.mkdir(test_dir)
 
 
@@ -56,9 +56,9 @@ results_df = pd.DataFrame({
 
 for i in range(number_of_tests):
     os.mkdir(os.path.join(test_dir, 'test' + str(i)))
-    n_variants = np.random.randint(2, 50, 1)[0]
+    n_variants = np.random.randint(2, 100, 1)[0]
     n_samples = np.random.randint(1, 10, 1)[0]
-    n_subpop = n_samples * 2
+    n_subpop = np.random.randint(1, 20, 1)[0]
     test_p_clon = p_clon_init(0.1, n_variants, n_subpop)
     test_p_clon = collapse_identical(test_p_clon)
     n_subpop = test_p_clon.shape[1]
@@ -70,7 +70,7 @@ for i in range(number_of_tests):
     test_f_var_df['Ref'] = 'A'
     test_f_var_df['Alt'] = 'T'
 
-    print(f'Test run:\n\tNumber of varinats: {n_variants}\n\tNumber of subpopulations: {n_subpop}')
+    print(f'Test run:\n\tNumber of varinats: {n_variants}\n\tNumber of subpopulations: {n_subpop}\n\tNumber of samples: {n_samples}')
     test_f_var_df.to_csv(os.path.join(test_dir, 'test' + str(i), 'test_variant_table.tsv'), header=True,
                                     index=False, sep='\t')
     pd.DataFrame(test_p_clon).to_csv(os.path.join(test_dir, 'test' + str(i), 'test_presence_table.tsv'), header=False,
@@ -94,7 +94,20 @@ for i in range(number_of_tests):
     # 5. distance between initial variant matrix and reconstructed
 
     # Read reconstructed profile
+    if not os.path.exists(os.path.join(test_dir, "test" + str(i), "out", "presence_sub_collapsed.tsv")):
+        continue
+    
+    class readNPfile(Exception):
+        pass
+    
     print('Calculate test statistics.')
+    try:
+        np.loadtxt(os.path.join(test_dir, "test" + str(i), "out", "presence_sub_collapsed.tsv"),
+                                 dtype='i',
+                                 delimiter='\t')
+    except ValueError:
+        continue
+
     reconstructed_p = np.loadtxt(os.path.join(test_dir, "test" + str(i), "out", "presence_sub_collapsed.tsv"),
                                  dtype='i',
                                  delimiter='\t')
