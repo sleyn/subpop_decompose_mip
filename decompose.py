@@ -93,8 +93,7 @@ with open(os.path.join(args.out_dir, 'presence_sub.tsv'), 'w') as out_p_file:
     for v in VARIANTS:
         out_p_file.write('\t'.join([str(value(p_matrix[v][s])) for s in SUBPOP]) + '\n')
 
-# Output reconstructd matrix
-reconstructed = np.ones((n_variants, n_samples))
+# Output reconstructed matrix
 np_s = np.ones((n_subpop, n_samples))
 np_p = np.ones((n_variants, n_subpop))
 
@@ -108,6 +107,8 @@ for s in SUBPOP:
     for m in SAMPLES:
         np_s[s, m] = value(s_matrix[s][m])
         
+pd.DataFrame(np_p.dot(np_s)).to_csv(os.path.join(args.out_dir, 'reconstructed.tsv'),
+                                                            header=False, index=False, sep='\t')
 
 # Sum identical subpopulations
 drop_subpop = set()
@@ -116,6 +117,7 @@ for subpop in range(np_p.shape[1]):
     # Additionally check if subpopulation has any frequency at least in one sample
     if np.sum(np_s[subpop, :]) == 0:
         drop_subpop.add(subpop)
+        continue
     for subpop1 in range(subpop + 1, np_p.shape[1]):
         if np.min(np_p[:, subpop] == np_p[:, subpop1]):
             np_s[subpop, :] += np_s[subpop1, :]
