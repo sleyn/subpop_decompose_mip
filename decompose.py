@@ -34,6 +34,8 @@ sample_columns = [column for column in freq_var_columns if column not in ['Chrom
 
 # convert percents to proportions
 if args.perc2prop:
+    # Remove "%" sign if exists
+    freq_var[sample_columns] = freq_var[sample_columns].applymap(lambda x: float(str(x).replace('%', '')))
     freq_var[sample_columns] = freq_var[sample_columns] / 100
 
 freq_var_matrix = freq_var[sample_columns].to_numpy()
